@@ -1,0 +1,369 @@
+# Copyright 2014-2016 by Cloudsoft Corporation Limited
+#
+# Use of this software is subject to the Cloudsoft EULA, provided at:
+#
+# - http://www.cloudsoftcorp.com/cloudsoft-developer-license
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+brooklyn.catalog:
+  version: "0.1-20160215.1852"
+
+  items:
+  - id: apache-mesos
+    name: "Apache Mesos"
+    description: |
+      An Apache Mesos cluster using the Marathon framework for containers.
+    origin: http://mesos.apache.org/
+    iconUrl: https://avatars3.githubusercontent.com/u/229272?v=3&s=200
+    itemType: template
+    item:
+      services:
+      - type: apache-mesos-cluster
+        id: apache-mesos-cluster
+        name: "Mesos Cluster"
+        brooklyn.parameters:
+        - name: mesos.slave.count
+          description: |
+            The number of Mesos Slave nodes to create in the cluster.
+          type: integer
+          default: 3
+        - name: mesos.cluster.name
+          description: |
+            The name the Mesos Cluster will use to identify itself.
+          type: string
+          default: "mesos"
+        brooklyn.config:
+          mesos.slave.count: 3
+          mesos.cluster.name: "mesos"
+
+  - id: apache-mesos-cluster
+    name: "Apache Mesos Cluster"
+    description: |
+      Mesos cluster with Marathon, Kafka, Spark and Riak frameworks.
+    item:
+      type: org.apache.brooklyn.entity.stock.BasicApplication
+      brooklyn.parameters:
+      - name: mesos.version
+        description: |
+          The version of Apache Mesos to be installed.
+        type: string
+        default: "0.26.0-0.2.145.ubuntu1404"
+      - name: mesos.dns.version
+        description: |
+          The version of the mesos-dns service to be installed.
+        type: string
+        default: "0.5.1"
+      - name: external.dns
+        description: |
+          The IP address of a DNS server that can resolve Internet domain names
+          and if necessary internal names in the cloud being deployed to.
+        type: string
+        default: "8.8.8.8"
+      brooklyn.config:
+        external.dns: "8.8.8.8"
+        mesos.version: "0.26.0-0.2.145.ubuntu1404"
+        mesos.dns.version: "0.5.1"
+      brooklyn.children:
+      - type: mesos-master
+        id: mesos-master
+        name: "Mesos Master Node"
+      - type: cluster
+        id: mesos-slave-cluster
+        name: "Mesos Slave Cluster"
+        initialSize: $brooklyn:config("mesos.slave.count")
+        firstMemberSpec:
+          $brooklyn:entitySpec:
+            type: mesos-slave
+            id: mesos-dns
+            name: "Mesos Slave (DNS) Node"
+            brooklyn.config:
+              mesos.master: $brooklyn:entity("mesos-master").attributeWhenReady("host.subnet.address")
+              mesos.endpoint: $brooklyn:entity("mesos-master").attributeWhenReady("mesos.endpoint")
+              mesos.dns: $brooklyn:attributeWhenReady("host.subnet.address")
+            post.launch.command: |
+              echo "[BROOKLYN] Configuring mesos-dns"
+              sudo mkdir -p /opt/mesos-dns
+              sudo chmod 755 /opt/mesos-dns
+              cd /opt/mesos-dns
+              ( sudo wget https://github.com/mesosphere/mesos-dns/releases/download/v${MESOS_DNS_VERSION}/mesos-dns-v${MESOS_DNS_VERSION}-linux-amd64.gz -O mesos-dns-v${MESOS_DNS_VERSION}-linux-amd64.gz \
+                && sudo gunzip mesos-dns-v${MESOS_DNS_VERSION}-linux-amd64.gz ) \
+                || sudo wget https://github.com/mesosphere/mesos-dns/releases/download/v${MESOS_DNS_VERSION}/mesos-dns-v${MESOS_DNS_VERSION}-linux-amd64 -O mesos-dns-v${MESOS_DNS_VERSION}-linux-amd64
+              sudo chmod 755 mesos-dns-v${MESOS_DNS_VERSION}-linux-amd64
+              sudo tee /opt/mesos-dns/config.json <<CONFIG
+              {
+                "zk": "${ZOOKEEPER_URI}",
+                "masters": [ "${MESOS_ENDPOINT}" ],
+                "refreshSeconds": 60,
+                "ttl": 60,
+                "domain": "mesos",
+                "port": 53,
+                "resolvers": [ "${NAMESERVER}" ],
+                "timeout": 5,
+                "httpon": true,
+                "dnson": true,
+                "httpport": 8123,
+                "externalon": true,
+                "listener": "0.0.0.0",
+                "SOAMname": "ns1.mesos",
+                "SOARname": "root.ns1.mesos",
+                "SOARefresh": 60,
+                "SOARetry": 600,
+                "SOAExpire": 86400,
+                "SOAMinttl": 60,
+                "IPSources": [ "netinfo", "mesos", "host" ]
+              }
+              CONFIG
+              sudo chmod 644 /opt/mesos-dns/config.json
+              sudo apt-get -y install python-httplib2 curl jq
+              wget "http://${HOST_SUBNET_ADDRESS}:5051/slave(1)/state.json" -O /tmp/state.json
+              MESOS_HOSTNAME=$(jq '.hostname' < /tmp/state.json)
+              cat > /tmp/marathon-deploy.mesos-dns.json <<MARATHON
+              {
+                  "cmd": "sudo /opt/mesos-dns/mesos-dns-v${MESOS_DNS_VERSION}-linux-amd64 -config=/opt/mesos-dns/config.json",
+                  "cpus": 1.0,
+                  "mem": 1024,
+                  "id": "mesos-dns",
+                  "instances": 1,
+                  "constraints": [ [ "hostname", "CLUSTER", ${MESOS_HOSTNAME} ] ]
+              }
+              MARATHON
+              echo "[BROOKLYN] Installing mesos-dns"
+              HTTP_STATUS=$(curl -sL -w "%{http_code}\n" -H "Content-Type: application/json" -XPOST --data "@/tmp/marathon-deploy.mesos-dns.json" "${MARATHON_URI}/v2/apps/mesos-dns" -o /tmp/response.json)
+              echo "[BROOKLYN] Status ${HTTP_STATUS}"
+              cat /tmp/response.json
+              test "${HTTP_STATUS}" == "200" -o "${HTTP_STATUS}" == "201" -o "${HTTP_STATUS}" == "204"
+            launch.latch:
+              $brooklyn:entity("mesos-master").attributeWhenReady("service.isUp")
+        memberSpec:
+          $brooklyn:entitySpec:
+            type: mesos-slave
+            id: mesos-slave
+            name: "Mesos Slave Node"
+            brooklyn.config:
+              mesos.master: $brooklyn:entity("mesos-master").attributeWhenReady("host.subnet.address")
+              mesos.dns: $brooklyn:entity("mesos-dns").attributeWhenReady("host.subnet.address")
+            launch.latch:
+              $brooklyn:entity("mesos-dns").attributeWhenReady("service.isUp")
+      brooklyn.enrichers:
+      - type: org.apache.brooklyn.enricher.stock.Propagator
+        brooklyn.config:
+          uniqueTag: uri-propagator
+          producer: $brooklyn:entity("mesos-master")
+          propagating:
+          - $brooklyn:sensor("main.uri")
+          - $brooklyn:sensor("mesos.endpoint")
+          - $brooklyn:sensor("marathon.uri")
+          - $brooklyn:sensor("zookeeper.uri")
+          - $brooklyn:sensor("zookeeper.endpoint")
+      - type: org.apache.brooklyn.enricher.stock.Propagator
+        brooklyn.config:
+          uniqueTag: slave-metrics-propagator
+          producer: $brooklyn:entity("mesos-slave-cluster")
+          sensorMapping:
+            $brooklyn:sensor("group.members.count"): $brooklyn:sensor("mesos.slave.count")
+
+  - id: mesos-master
+    name: "Apache Mesos Master"
+    description: |
+      Mesos master node install.
+    item:
+      type: brooklyn.entity.basic.VanillaSoftwareProcess
+      provisioning.properties:
+        osFamily: ubuntu
+        osVersionRegex: 14.04
+        installDevUrandom: true
+        minRam: 4g
+        minCores: 4
+        inboundPorts:
+        - 22
+        - 80
+        - 2181
+        - 5000
+        - 5050
+        - 8080
+      pre.install.command: |
+        sudo sed -i "/$(hostname)/d" /etc/hosts
+        echo "$HOST_SUBNET_ADDRESS $(hostname)" | sudo tee -a /etc/hosts
+      install.command: |
+        echo "[BROOKLYN] Configuring repositories"
+        sudo apt-get -y install software-properties-common
+        DISTRO=$(lsb_release -is | tr '[:upper:]' '[:lower:]')
+        CODENAME=$(lsb_release -cs)
+        sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv E56151BF
+        echo "deb http://repos.mesosphere.com/${DISTRO} ${CODENAME} main" |
+          sudo tee /etc/apt/sources.list.d/mesosphere.list
+        sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv A88D21E9
+        echo "deb https://get.docker.io/${DISTRO} docker main" |
+          sudo tee /etc/apt/sources.list.d/docker.list
+        sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 86F44E2A
+        sudo add-apt-repository -y ppa:openjdk-r/ppa
+        sudo apt-get -y update
+        echo "[BROOKLYN] Installing packages"
+        sudo apt-get -y install make git gcc g++ curl python-dev libcppunit-dev libunwind8-dev autoconf autotools-dev \
+          libltdl-dev libtool autopoint libcurl4-openssl-dev libsasl2-dev openjdk-8-jdk default-jre python-setuptools \
+          python-protobuf libprotobuf-dev protobuf-compiler
+        sudo update-alternatives --set java /usr/lib/jvm/java-8-openjdk-amd64/jre/bin/java
+        sudo apt-get -y install mesos=${MESOS_VERSION} marathon
+      customize.command: |
+        echo "[BROOKLYN] Stopping zookeeper, marathon and mesos-master services"
+        sudo service zookeeper stop || true
+        sudo service mesos-master stop || true
+        sudo service marathon stop || true
+        echo "[BROOKLYN] Configuring zookeeper service"
+        sudo sed -i.bk '/server\.[0-9][0-9]*/d' /etc/zookeeper/conf/zoo.cfg
+        echo "server.1=${MESOS_MASTER}:2888:3888" | sudo tee -a /etc/zookeeper/conf/zoo.cfg
+        echo "1" | sudo tee /etc/zookeeper/conf/myid
+        echo "[BROOKLYN] Reconfiguring mesos-master service"
+        echo "riak" | sudo tee /etc/mesos-master/roles
+        echo "replicated_log" | sudo tee /etc/mesos-master/registry
+        echo "${MESOS_CLUSTER_NAME}" | sudo tee /etc/mesos-master/cluster
+        echo "${HOST_ADDRESS}" | sudo tee /etc/mesos-master/advertise_ip
+        echo "${HOST_ADDRESS}" | sudo tee /etc/mesos-master/hostname
+        echo "${ZOOKEEPER_URI}" | sudo tee /etc/mesos/zk
+        echo "1" | sudo tee /etc/mesos-master/quorum
+        echo "false" | sudo tee /etc/mesos-master/hostname_lookup
+        echo "[BROOKLYN] Configuring marathon service"
+        sudo mkdir -p /etc/marathon/conf
+        sudo sed -i.bk "s/^exec \/usr\/bin\/marathon.*/exec \/usr\/bin\/marathon --event_subscriber http_callback --http_endpoints http:\/\/localhost:5000\/eventbus/" /etc/init/marathon.conf
+        echo "${ZOOKEEPER_URI}" | sudo tee /etc/marathon/conf/master
+        echo "[BROOKLYN] Starting zookeeper, mesos-master and marathon services"
+        sudo service zookeeper start
+        sudo service mesos-master start
+        sudo service marathon start
+      launch.command: |
+        echo -n "[BROOKLYN] Restarting mesos-master and marathon services..."
+        sudo service zookeeper restart
+        sudo service mesos-master restart
+        sudo service marathon restart
+      checkRunning.command: |
+        sudo service mesos-master status | grep running
+        sudo service zookeeper status | grep running
+        sudo service marathon status | grep running
+      shell.env:
+        HOST_NAME: $brooklyn:attributeWhenReady("host.name")
+        HOST_ADDRESS: $brooklyn:attributeWhenReady("host.address")
+        HOST_SUBNET_ADDRESS: $brooklyn:attributeWhenReady("host.subnet.address")
+        MESOS_MASTER: $brooklyn:config("mesos.master")
+        MESOS_CLUSTER_NAME: $brooklyn:config("mesos.cluster.name")
+        MESOS_VERSION: $brooklyn:config("mesos.version")
+        ZOOKEEPER_URI: $brooklyn:entity("mesos-master").attributeWhenReady("zookeeper.uri")
+      brooklyn.enrichers:
+      - type: org.apache.brooklyn.enricher.stock.Transformer
+        brooklyn.config:
+          uniqueTag: mesos-url-generator
+          enricher.sourceSensor: $brooklyn:sensor("host.address")
+          enricher.targetSensor: $brooklyn:sensor("main.uri")
+          enricher.targetValue:
+            $brooklyn:formatString:
+            - "http://%s:5050/"
+            - $brooklyn:attributeWhenReady("host.address")
+      - type: org.apache.brooklyn.enricher.stock.Transformer
+        brooklyn.config:
+          uniqueTag: mesos-endpoint-generator
+          enricher.sourceSensor: $brooklyn:sensor("host.address")
+          enricher.targetSensor: $brooklyn:sensor("mesos.endpoint")
+          enricher.targetValue:
+            $brooklyn:formatString:
+            - "%s:5050"
+            - $brooklyn:attributeWhenReady("host.address")
+      - type: org.apache.brooklyn.enricher.stock.Transformer
+        brooklyn.config:
+          uniqueTag: marathon-url-generator
+          enricher.sourceSensor: $brooklyn:sensor("host.address")
+          enricher.targetSensor: $brooklyn:sensor("marathon.uri")
+          enricher.targetValue:
+            $brooklyn:formatString:
+            - "http://%s:8080/"
+            - $brooklyn:attributeWhenReady("host.address")
+      - type: org.apache.brooklyn.enricher.stock.Transformer
+        brooklyn.config:
+          uniqueTag: zookeeper-endpoint-generator
+          enricher.sourceSensor: $brooklyn:sensor("host.subnet.address")
+          enricher.targetSensor: $brooklyn:sensor("zookeeper.endpoint")
+          enricher.targetValue:
+            $brooklyn:formatString:
+            - "%s:2181"
+            - $brooklyn:attributeWhenReady("host.address")
+      - type: org.apache.brooklyn.enricher.stock.Transformer
+        brooklyn.config:
+          uniqueTag: zookeeper-url-generator
+          enricher.sourceSensor: $brooklyn:sensor("zookeeper.endpoint")
+          enricher.targetSensor: $brooklyn:sensor("zookeeper.uri")
+          enricher.targetValue:
+            $brooklyn:formatString:
+            - "zk://%s/mesos"
+            - $brooklyn:attributeWhenReady("zookeeper.endpoint")
+
+  - id: mesos-slave
+    name: "Apahe Mesos Slave"
+    description: |
+      Mesos slave node install.
+    item:
+      type: brooklyn.entity.basic.VanillaSoftwareProcess
+      provisioning.properties:
+        osFamily: ubuntu
+        osVersionRegex: 14.04
+        installDevUrandom: true
+        minRam: 8g
+        minCores: 4
+        inboundPorts:
+        - 22
+        - 5051
+      pre.install.command: |
+        sudo sed -i "/$(hostname)/d" /etc/hosts
+        echo "${HOST_SUBNET_ADDRESS} $(hostname)" | sudo tee -a /etc/hosts
+      install.command: |
+        echo "[BROOKLYN] Configuring repositories"
+        sudo apt-get -y install software-properties-common
+        DISTRO=$(lsb_release -is | tr '[:upper:]' '[:lower:]')
+        CODENAME=$(lsb_release -cs)
+        sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv E56151BF
+        echo "deb http://repos.mesosphere.com/${DISTRO} ${CODENAME} main" |
+          sudo tee /etc/apt/sources.list.d/mesosphere.list
+        sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv A88D21E9
+        echo "deb https://get.docker.io/${DISTRO} docker main" |
+          sudo tee /etc/apt/sources.list.d/docker.list
+        sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 86F44E2A
+        sudo add-apt-repository -y ppa:openjdk-r/ppa
+        sudo apt-get -y update
+        echo "[BROOKLYN] Installing packages"
+        sudo apt-get -y install make git gcc g++ curl python-dev libcppunit-dev libunwind8-dev autoconf autotools-dev libltdl-dev libtool autopoint libcurl4-openssl-dev libsasl2-dev openjdk-8-jdk default-jre python-setuptools python-protobuf libprotobuf-dev protobuf-compiler
+        sudo apt-get -y install mesos=${MESOS_VERSION}
+        sudo apt-get -y install lxc-docker
+      customize.command: |
+        echo "[BROOKLYN] Disbling mesos-master and zookeeper services"
+        sudo service zookeeper stop || true
+        sudo service mesos-master stop || true
+        echo "manual" | sudo tee /etc/init/zookeeper.override
+        echo "manual" | sudo tee /etc/init/mesos-master.override
+        echo "[BROOKLYN] Reconfiguring mesos-slave service"
+        sudo rm -f /tmp/mesos/meta/slaves/latest
+        echo "false" | sudo tee /etc/mesos-slave/hostname_lookup
+        echo "docker,mesos" | sudo tee /etc/mesos-slave/containerizers
+        echo "5mins" | sudo tee /etc/mesos-slave/executor_registration_timeout
+        echo "${HOST_ADDRESS}" | sudo tee /etc/mesos-slave/hostname
+        echo "${HOST_SUBNET_ADDRESS}" | sudo tee /etc/mesos-slave/ip
+        echo "${ZOOKEEPER_URI}" | sudo tee /etc/mesos/zk
+      launch.command: |
+        echo "[BROOKLYN] Restarting mesos-slave service"
+        sudo service mesos-slave start
+      checkRunning.command: |
+        sudo service mesos-slave status | grep running
+      shell.env:
+        HOST_NAME: $brooklyn:attributeWhenReady("host.name")
+        HOST_ADDRESS: $brooklyn:attributeWhenReady("host.address")
+        HOST_SUBNET_ADDRESS: $brooklyn:attributeWhenReady("host.subnet.address")
+        MESOS_ENDPOINT: $brooklyn:config("mesos.endpoint")
+        MESOS_MASTER: $brooklyn:config("mesos.master")
+        MESOS_VERSION: $brooklyn:config("mesos.version")
+        MESOS_DNS_VERSION: $brooklyn:config("mesos.dns.version")
+        MESOS_DNS: $brooklyn:config("mesos.dns")
+        ZOOKEEPER_URI: $brooklyn:entity("mesos-master").attributeWhenReady("zookeeper.uri")
+        MESOS_URI: $brooklyn:entity("mesos-master").attributeWhenReady("main.uri")
+        MARATHON_URI: $brooklyn:entity("mesos-master").attributeWhenReady("marathon.uri")
+        NAMESERVER: $brooklyn:config("external.dns")
