@@ -1,0 +1,51 @@
+id: nodejs-demo-application
+name: "Node.js Demo Application"
+description: |
+  Node.js todo list application with redis database
+location: my-mesos-cluster
+services:
+- type: org.apache.brooklyn.entity.stock.BasicApplication
+  brooklyn.children:
+  - type: org.apache.brooklyn.entity.nosql.redis.RedisStore
+    id: redis
+    name: "Redis"
+    brooklyn.config:
+      install.version: 3.0.3
+#  - type: docker:redis:3
+#    id: redis
+#    name: "Redis"
+#    openPorts:
+#    - 6379
+  - type: org.apache.brooklyn.entity.webapp.nodejs.NodeJsWebAppService
+    id: nodejs
+    name: "Node.js"
+    brooklyn.config:
+      docker.direct.ports:
+      - "http.port"
+      gitRepoUrl:
+        "https://github.com/grkvlt/nodejs-todo/"
+      appFileName: server.js
+      appName: nodejs-todo
+      nodePackages:
+      - express
+      - ejs
+      - jasmine-node
+      - underscore
+      - method-override
+      - cookie-parser
+      - express-session
+      - body-parser
+      - cookie-session
+      - redis
+      - redis-url
+      - connect
+      post.install.command: |
+        sudo apt-get install -y haveged
+      env:
+        REDISTOGO_URL: >
+          $brooklyn:formatString("redis://%s:%d/",
+          component("redis").attributeWhenReady("host.subnet.hostname"),
+          component("redis").attributeWhenReady("redis.port"))
+      launch.latch: $brooklyn:component("redis").attributeWhenReady("service.isUp")
+      provisioning.properties:
+        installDevUrandom: true
