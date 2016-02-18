@@ -11,7 +11,7 @@
 # under the License.
 
 brooklyn.catalog:
-  version: "0.1-20160215.1852"
+  version: "0.1-20160215.2015"
 
   items:
   - id: apache-mesos
@@ -133,9 +133,8 @@ brooklyn.catalog:
               }
               MARATHON
               echo "[BROOKLYN] Installing mesos-dns"
-              HTTP_STATUS=$(curl -sL -w "%{http_code}\n" -H "Content-Type: application/json" -XPOST --data "@/tmp/marathon-deploy.mesos-dns.json" "${MARATHON_URI}/v2/apps/mesos-dns" -o /tmp/response.json)
+              HTTP_STATUS=$(curl -sL -w "%{http_code}\n" -H "Content-Type: application/json" -XPUT --data "@/tmp/marathon-deploy.mesos-dns.json" "${MARATHON_URI}v2/apps/mesos-dns" -o /tmp/response.json)
               echo "[BROOKLYN] Status ${HTTP_STATUS}"
-              cat /tmp/response.json
               test "${HTTP_STATUS}" == "200" -o "${HTTP_STATUS}" == "201" -o "${HTTP_STATUS}" == "204"
             launch.latch:
               $brooklyn:entity("mesos-master").attributeWhenReady("service.isUp")
