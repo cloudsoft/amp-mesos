@@ -44,7 +44,7 @@ brooklyn.catalog:
   - id: apache-mesos-cluster
     name: "Apache Mesos Cluster"
     description: |
-      Mesos cluster with Marathon, Kafka, Spark and Riak frameworks.
+      Mesos cluster with Marathon frameworks installed
     item:
       type: org.apache.brooklyn.entity.stock.BasicApplication
       brooklyn.parameters:
@@ -218,7 +218,6 @@ brooklyn.catalog:
         echo "server.1=${MESOS_MASTER}:2888:3888" | sudo tee -a /etc/zookeeper/conf/zoo.cfg
         echo "1" | sudo tee /etc/zookeeper/conf/myid
         echo "[BROOKLYN] Reconfiguring mesos-master service"
-        echo "riak" | sudo tee /etc/mesos-master/roles
         echo "replicated_log" | sudo tee /etc/mesos-master/registry
         echo "${MESOS_CLUSTER_NAME}" | sudo tee /etc/mesos-master/cluster
         echo "${HOST_ADDRESS}" | sudo tee /etc/mesos-master/advertise_ip
