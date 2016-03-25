@@ -11,8 +11,20 @@
 # under the License.
 
 location:
-  named:ibm-bluebox-lon:
-    securityGroups: [ "mesos-ports-open" ]
+  jclouds:openstack-nova:
+    endpoint: https://cloudsoft2-lon.openstack.blueboxgrid.com:5000/v2.0
+    identity: clocker:clocker
+    credential: "XXXXXXXXXXXX"
+    jclouds.keystone.credential-type: passwordCredentials
+    jclouds.openstack-nova.auto-create-floating-ips: true
+    jclouds.openstack-nova.auto-generate-keypairs: false
+    loginUser: ubuntu
+    loginUser.privateKeyFile: ~/.ssh/openstack.pem
+    securityGroups: [ "mesos" ]
+    templateOptions:
+      networks: [ "e0308d68-96b3-44cc-8b15-5e2474802c45" ]
+      floatingIpPoolNames: [ "external" ]
+      keyPairName: "openstack"
 
 services:
 - type: apache-mesos

@@ -11,21 +11,20 @@
 # under the License.
 
 brooklyn.catalog:
-  version: "0.1-20160215.2015"
+  version: "0.1-20160323.1620"
 
   items:
   - id: apache-mesos
     name: "Apache Mesos"
     description: |
-      An Apache Mesos cluster using the Marathon framework for containers.
+      An Apache Mesos cluster using the Marathon framework for containers,
+      and Clocker for Brooklyn application deployment and management.
     origin: http://mesos.apache.org/
     iconUrl: https://avatars3.githubusercontent.com/u/229272?v=3&s=200
     itemType: template
     item:
       services:
-      - type: apache-mesos-cluster
-        id: apache-mesos-cluster
-        name: "Mesos Cluster"
+      - type: apache-mesos-application
         brooklyn.parameters:
         - name: mesos.slave.count
           description: |
@@ -37,14 +36,49 @@ brooklyn.catalog:
             The name the Mesos Cluster will use to identify itself.
           type: string
           default: "mesos"
+        - name: mesos.slave.user
+          description: |
+            The username used to connect to the Mesos slaves.
+          type: string
+          default: "ubuntu"
+        - name: mesos.slave.privateKey
+          description: |
+            The private key file used to connect to the Mesos slaves.
+          type: string
+          default: "~/.ssh/mesos.pem"
         brooklyn.config:
           mesos.slave.count: 3
+          mesos.slave.user: "ubuntu"
+          mesos.slave.privateKey: "~/.ssh/mesos.pem"
           mesos.cluster.name: "mesos"
+
+  - id: apache-mesos-application
+    name: "Apache Mesos Application"
+    item:
+      type: org.apache.brooklyn.entity.stock.BasicApplication
+      brooklyn.children:
+      - type: apache-mesos-cluster
+        id: apache-mesos-cluster
+        name: "Apache Mesos Cluster"
+      - type: external-mesos-cluster
+        id: clocker-cluster-access
+        name: "Clocker Mesos Cluster Access"
+        brooklyn.config:
+          start.latch: $brooklyn:component("apache-mesos-cluster").attributeWhenReady("service.isUp")
+          entity.dynamicLocation.name:
+            $brooklyn:formatString:
+            - "my-%s-cluster"
+            - $brooklyn:config("mesos.cluster.name")
+          mesos.url: $brooklyn:component("apache-mesos-cluster").attributeWhenReady("main.uri")
+          marathon.mesos.framework.url: $brooklyn:component("apache-mesos-cluster").attributeWhenReady("marathon.uri")
+          mesos.slave.accessible: true
+          mesos.slave.ssh.user: $brooklyn:config("mesos.slave.user")
+          mesos.slave.ssh.privateKey.file: $brooklyn:config("mesos.slave.privateKey")
 
   - id: apache-mesos-cluster
     name: "Apache Mesos Cluster"
     description: |
-      Mesos cluster with Marathon frameworks installed
+      Mesos cluster with Marathon framework.
     item:
       type: org.apache.brooklyn.entity.stock.BasicApplication
       brooklyn.parameters:
@@ -186,8 +220,16 @@ brooklyn.catalog:
         - 5050
         - 8080
       pre.install.command: |
-        sudo sed -i "/$(hostname)/d" /etc/hosts
-        echo "$HOST_SUBNET_ADDRESS $(hostname)" | sudo tee -a /etc/hosts
+        echo "[BROOKLYN] Configuring hostname"
+        if [ "${HOST_ADDRESS}" == "${HOST_NAME}" ] ; then
+          if grep "${HOST_ADDRESS}" /etc/hosts ; then
+            HOSTNAME=$(grep "${HOST_ADDRESS}" /etc/hosts | head -1 - | awk '{ print $2; }' | cut -d. -f1)
+            sudo hostname ${HOSTNAME}
+          fi
+        fi
+        sudo sed -i "/${HOST_ADDRESS}/d" /etc/hosts
+        ( echo "$HOST_SUBNET_ADDRESS $(hostname)" ; echo "$HOST_ADDRESS $(hostname)" ) |
+          sudo tee -a /etc/hosts
       install.command: |
         echo "[BROOKLYN] Configuring repositories"
         sudo apt-get -y install software-properties-common
@@ -313,8 +355,16 @@ brooklyn.catalog:
         - 22
         - 5051
       pre.install.command: |
-        sudo sed -i "/$(hostname)/d" /etc/hosts
-        echo "${HOST_SUBNET_ADDRESS} $(hostname)" | sudo tee -a /etc/hosts
+        echo "[BROOKLYN] Configuring hostname"
+        if [ "${HOST_ADDRESS}" == "${HOST_NAME}" ] ; then
+          if grep "${HOST_ADDRESS}" /etc/hosts ; then
+            HOSTNAME=$(grep "${HOST_ADDRESS}" /etc/hosts | head -1 - | awk '{ print $2; }' | cut -d. -f1)
+            sudo hostname ${HOSTNAME}
+          fi
+        fi
+        sudo sed -i "/${HOST_ADDRESS}/d" /etc/hosts
+        ( echo "$HOST_SUBNET_ADDRESS $(hostname)" ; echo "$HOST_ADDRESS $(hostname)" ) |
+          sudo tee -a /etc/hosts
       install.command: |
         echo "[BROOKLYN] Configuring repositories"
         sudo apt-get -y install software-properties-common
