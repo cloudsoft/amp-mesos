@@ -13,13 +13,19 @@
 location:
   jclouds:softlayer:
     region: ams01
-    templateOptions:
-      primaryNetworkComponentNetworkVlanId: 1153481
-      primaryBackendNetworkComponentNetworkVlanId: 1153483
+    loginUser: ubuntu
+    loginUser.privateKeyFile: ~/.ssh/softlayer.pem
+    customizers:
+    - $brooklyn:object:
+        type: org.apache.brooklyn.location.jclouds.softlayer.SoftLayerSameVlanLocationCustomizer
 
 services:
 - type: apache-mesos
   name: "SoftLayer Apache Mesos Cluster (Amsterdam)"
   brooklyn.config:
+    softlayer.vlan.scopeUid: "my-softlayer-cluster"
+    softlayer.vlan.timeout: 20m
     mesos.slave.count: 3
     mesos.cluster.name: "softlayer"
+    mesos.slave.user: "ubuntu"
+    mesos.slave.privateKey: "~/.ssh/softlayer.pem"
