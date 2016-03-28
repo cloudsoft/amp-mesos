@@ -32,3 +32,5 @@ services:
   brooklyn.config:
     mesos.slave.count: 3
     mesos.cluster.name: "bluebox"
+    mesos.slave.user: "ubuntu"
+    mesos.slave.privateKey: "~/.ssh/openstack.pem"
