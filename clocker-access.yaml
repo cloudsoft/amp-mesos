@@ -10,7 +10,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-name: "Clocker Apache Mesos Access (Blue Box, London)"
+name: "Clocker Apache Mesos Access"
 
 description: |
   Access an Apache Mesos cluster using Clocker.
@@ -22,11 +22,11 @@ description: |
 services:
 - type: external-mesos-cluster
   id: clocker-mesos-access
-  name: "Clocker Mesos Access (Blue Box, London)"
+  name: "Clocker Mesos Access"
   brooklyn.config:
-    entity.dynamicLocation.name: "bluebox-mesos-cluster"
-    mesos.url: "http://169.50.81.112:5050/"
-    marathon.mesos.framework.url: "http://169.50.81.112:8080/"
+    entity.dynamicLocation.name: "my-mesos-cluster"
+    mesos.url: "http://1.2.3.4:5050/"
+    marathon.mesos.framework.url: "http://1.2.3.4:8080/"
     mesos.slave.accessible: true
     mesos.slave.ssh.user: "ubuntu"
     mesos.slave.ssh.privateKey.file: "~/.ssh/openstack.pem"
