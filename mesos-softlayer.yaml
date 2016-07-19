@@ -11,21 +11,21 @@
 # under the License.
 
 location:
-  jclouds:softlayer:
-    region: ams01
-    loginUser: ubuntu
-    loginUser.privateKeyFile: ~/.ssh/softlayer.pem
+  jclouds:softlayer:ams01:
+    loginUser: "ubuntu"
+    loginUser.privateKeyFile: "~/.ssh/softlayer.pem"
     customizers:
-    - $brooklyn:object:
-        type: org.apache.brooklyn.location.jclouds.softlayer.SoftLayerSameVlanLocationCustomizer
+      - $brooklyn:object:
+          type: org.apache.brooklyn.location.jclouds.softlayer.SoftLayerSameVlanLocationCustomizer
+          brooklyn.config:
+            softlayer.vlan.scopeUid: "mesos"
+            softlayer.vlan.timeout: 20m
 
 services:
-- type: apache-mesos
-  name: "SoftLayer Apache Mesos Cluster (Amsterdam)"
-  brooklyn.config:
-    softlayer.vlan.scopeUid: "my-softlayer-cluster"
-    softlayer.vlan.timeout: 20m
-    mesos.slave.count: 3
-    mesos.cluster.name: "softlayer"
-    mesos.slave.user: "ubuntu"
-    mesos.slave.privateKey: "~/.ssh/softlayer.pem"
+  - type: apache-mesos
+    name: "apache-mesos-softlayer-ams01"
+    brooklyn.config:
+      mesos.slave.count: 5
+      mesos.cluster.name: "softlayer"
+      mesos.slave.user: "ubuntu"
+      mesos.slave.privateKey: "~/.ssh/softlayer.pem"
