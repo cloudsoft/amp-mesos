@@ -11,7 +11,7 @@
 # under the License.
 
 brooklyn.catalog:
-  version: "0.2-SNAPSHOT" # AMP_MESOS_VERSION
+  version: "0.1" # AMP_MESOS_VERSION
   iconUrl: https://avatars3.githubusercontent.com/u/229272?v=3&s=200
 
   publish:
